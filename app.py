@@ -72,7 +72,7 @@ with st.sidebar:
     
     region = st.selectbox("Select Region", ['US48', 'CAL', 'TEX', 'NY', 'FLA'], help="The geographical region for demand data.")
     
-    available_models = ['LightGBM', 'XGBoost', 'Random Forest']
+    available_models = ['LightGBM', 'XGBoost', 'Random Forest', 'SARIMAX', 'Exponential Smoothing']
     selected_models = st.multiselect("Select Models to Train", available_models, default=['LightGBM'])
     
     if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
@@ -97,19 +97,35 @@ with st.sidebar:
 
                         st.info(f"Step 3/4: Preparing data and splitting...")
                         forecaster = EnergyForecaster()
-                        X_train, X_test, y_train, y_test = forecaster.prepare_data_for_ml(final_df)
                         
-                        st.session_state.y_test = y_test # Save for all models
-                        st.session_state.energy_df = energy_df
-                        st.session_state.weather_df = weather_df
-
+                        # Data preparation and training loop
                         for model_name in selected_models:
+                            st.info(f"Processing {model_name}...")
+                            
+                            # Prepare data based on model type
+                            if model_name in ['SARIMAX', 'Exponential Smoothing']:
+                                X_train, X_test, y_train, y_test = forecaster.prepare_data_for_time_series(final_df)
+                            else:
+                                X_train, X_test, y_train, y_test = forecaster.prepare_data_for_ml(final_df)
+
+                            st.session_state.y_test = y_test # Save for all models
+                            st.session_state.energy_df = energy_df
+                            st.session_state.weather_df = weather_df
+
                             st.info(f"Training {model_name} model...")
                             model = forecaster.train_model(model_name, X_train, y_train)
                             
                             st.info(f"Evaluating {model_name} on test set...")
-                            predictions = model.predict(X_test)
-                            predictions = pd.Series(predictions, index=y_test.index)
+                            # Prediction logic depends on the model
+                            if model_name == 'SARIMAX':
+                                predictions = model.predict(start=y_test.index[0], end=y_test.index[-1], exog=X_test)
+                                predictions = pd.Series(predictions, index=y_test.index)
+                            elif model_name == 'Exponential Smoothing':
+                                predictions = model.forecast(steps=len(y_test))
+                                predictions = pd.Series(predictions, index=y_test.index)
+                            else:
+                                predictions = model.predict(X_test)
+                                predictions = pd.Series(predictions, index=y_test.index)
 
                             # Store results for this model
                             st.session_state.model_results[model_name] = {
