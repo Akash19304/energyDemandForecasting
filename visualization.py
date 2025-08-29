@@ -2,6 +2,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from logger import logger # Import the configured logger
+import plotly.express as px
 
 # =============================================================================
 # 4. VISUALIZATION FUNCTIONS
@@ -26,11 +27,36 @@ class EnergyVisualizer:
 
     @staticmethod
     def plot_predictions(y_true, y_pred, title="Predictions vs Actual"):
-        """Plot predictions against actual values."""
+        """Plot predictions against actual values for a single model."""
         logger.info(f"Generating predictions vs. actual plot titled: '{title}'")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=y_true.index, y=y_true, name="Actual", mode='lines', line=dict(color='royalblue')))
-        fig.add_trace(go.Scatter(x=y_true.index, y=y_pred, name="Predicted", mode='lines', line=dict(color='crimson', dash='dash')))
+        fig.add_trace(go.Scatter(x=y_true.index, y=y_true, name="Actual", mode='lines', line=dict(color='royalblue', width=2)))
+        fig.add_trace(go.Scatter(x=y_pred.index, y=y_pred, name="Predicted", mode='lines', line=dict(color='crimson', dash='dash')))
+        fig.update_layout(
+            title_text=title,
+            xaxis_title="Date",
+            yaxis_title="Demand (MW)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        return fig
+
+    @staticmethod
+    def plot_predictions_comparison(y_true, predictions_dict, title="Model Predictions vs. Actual"):
+        """Plot predictions from multiple models against actual values."""
+        logger.info(f"Generating predictions comparison plot for models: {list(predictions_dict.keys())}")
+        fig = go.Figure()
+        
+        # Add the actual data first, with a thicker line for emphasis
+        fig.add_trace(go.Scatter(x=y_true.index, y=y_true, name="Actual", mode='lines', line=dict(color='black', width=3)))
+        
+        # Use a color sequence for models
+        colors = px.colors.qualitative.Plotly
+        
+        # Add a trace for each model's predictions
+        for i, (model_name, y_pred) in enumerate(predictions_dict.items()):
+            color = colors[i % len(colors)]
+            fig.add_trace(go.Scatter(x=y_pred.index, y=y_pred, name=model_name, mode='lines', line=dict(color=color, dash='dot')))
+            
         fig.update_layout(
             title_text=title,
             xaxis_title="Date",

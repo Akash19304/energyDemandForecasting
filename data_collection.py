@@ -36,23 +36,23 @@ class EnergyDataCollector:
         headers = {'Accept': 'application/json'}
         url = f"{self.base_url}electricity/rto/region-data/data/"
         
-        while True:
-            params = {
-                'api_key': self.api_key,
-                'frequency': 'hourly',
-                'data[0]': 'value',
-                'facets[respondent][]': region,
-                'facets[type][]': 'D',  # D = Demand
-                'start': start_date,
-                'end': end_date,
-                'sort[0][column]': 'period',
-                'sort[0][direction]': 'asc',
-                'offset': offset,
-                'length': length
-            }
-            
-            try:
-                response = requests.get(url, params=params, headers=headers)
+        try:
+            while True:
+                params = {
+                    'api_key': self.api_key,
+                    'frequency': 'hourly',
+                    'data[0]': 'value',
+                    'facets[respondent][]': region,
+                    'facets[type][]': 'D',  # D = Demand
+                    'start': start_date,
+                    'end': end_date,
+                    'sort[0][column]': 'period',
+                    'sort[0][direction]': 'asc',
+                    'offset': offset,
+                    'length': length
+                }
+                
+                response = requests.get(url, params=params, headers=headers, timeout=20)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -70,11 +70,11 @@ class EnergyDataCollector:
                 offset += length
                 time.sleep(0.2)
 
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching EIA data: {e}", exc_info=True)
-                if e.response:
-                    logger.error(f"EIA API Response Text: {e.response.text}")
-                raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching EIA data: {e}", exc_info=True)
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"EIA API Response Text: {e.response.text}")
+            raise
 
         if not all_data:
             logger.warning("No energy data was returned from the EIA API for the selected range.")
@@ -92,9 +92,9 @@ class WeatherDataCollector:
 
     def get_weather_data(self, start_date, end_date, lat=39.8283, lon=-98.5795):
         """Get historical weather data from Open-Meteo."""
-        logger.info(f"Fetching real weather data from Open-Meteo from {start_date} to {end_date}")
-
+        logger.info(f"Fetching HISTORICAL weather data from Open-Meteo from {start_date} to {end_date}")
         url = "https://archive-api.open-meteo.com/v1/archive"
+
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -105,7 +105,7 @@ class WeatherDataCollector:
         }
 
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=20)
             response.raise_for_status()
             data = response.json()
 
@@ -118,12 +118,12 @@ class WeatherDataCollector:
                 'windspeed_10m': 'wind_speed',
                 'shortwave_radiation': 'solar_radiation'
             })
-            logger.info(f"Successfully fetched {len(df)} records from Open-Meteo.")
+            logger.info(f"Successfully fetched {len(df)} weather records.")
             return df[['temperature', 'humidity', 'wind_speed', 'solar_radiation']]
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching Open-Meteo data: {e}", exc_info=True)
-            if e.response:
+            if hasattr(e, 'response') and e.response:
                 logger.error(f"Open-Meteo API Response Text: {e.response.text}")
             raise
 
@@ -134,21 +134,16 @@ class EconomicDataCollector:
         """Get economic indicators from yfinance."""
         logger.info(f"Fetching economic data from yfinance for dates {start_date} to {end_date}")
         try:
-            # Download data for all tickers at once
             tickers = "CL=F NG=F ^VIX"
             data = yf.download(tickers, start=start_date, end=end_date, interval='1d', progress=False)
             
-            # Check if data is empty
             if data.empty:
                 logger.warning("yfinance returned no economic data for the selected date range.")
-                # Return an empty DataFrame with the correct columns to prevent downstream errors
                 return pd.DataFrame(columns=['oil_price', 'gas_price', 'vix'])
 
-            # Select the 'Close' prices and rename columns
             economic_daily = data['Close']
             economic_daily = economic_daily.rename(columns={'CL=F': 'oil_price', 'NG=F': 'gas_price', '^VIX': 'vix'})
             
-            # Forward fill missing values and resample to hourly
             economic_daily = economic_daily.fillna(method='ffill')
             economic_hourly = economic_daily.resample('H').ffill()
             

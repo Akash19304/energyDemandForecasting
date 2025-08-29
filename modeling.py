@@ -6,6 +6,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import xgboost as xgb
 import lightgbm as lgb
 from logger import logger # Import the configured logger
+from feature_engineering import FeatureEngineer
 
 # =============================================================================
 # 3. MODEL IMPLEMENTATIONS & EVALUATION
@@ -18,11 +19,14 @@ class EnergyForecaster:
         self.models = {}
         self.scalers = {}
         self.feature_importance = {}
+        self.trained_model = None
+        self.feature_engineer = FeatureEngineer()
+        self.trained_columns = []
 
     def prepare_data_for_ml(self, df, target_col='demand_mw', test_size=0.2):
         logger.info("Preparing data for machine learning models...")
-        feature_cols = [col for col in df.columns if col != target_col]
-        X = df[feature_cols]
+        self.trained_columns = [col for col in df.columns if col != target_col]
+        X = df[self.trained_columns]
         y = df[target_col]
 
         split_idx = int(len(df) * (1 - test_size))
@@ -42,26 +46,53 @@ class EnergyForecaster:
         if model_name == 'Random Forest':
             model = RandomForestRegressor(n_estimators=100, max_depth=20, random_state=42, n_jobs=-1)
         elif model_name == 'XGBoost':
-            model = xgb.XGBRegressor(n_estimators=500, max_depth=8, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, random_state=42, early_stopping_rounds=30)
+            model = xgb.XGBRegressor(n_estimators=500, max_depth=8, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, random_state=42)
         elif model_name == 'LightGBM':
-            model = lgb.LGBMRegressor(n_estimators=500, max_depth=8, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, random_state=42, early_stopping_rounds=30, verbose=-1)
+            model = lgb.LGBMRegressor(n_estimators=500, max_depth=8, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, random_state=42, verbose=-1)
         else:
             logger.error(f"Unsupported model name provided: {model_name}")
             raise ValueError("Unsupported model name")
 
         logger.info(f"Starting training for {model_name} model...")
-        if model_name in ['XGBoost', 'LightGBM']:
-            val_size = int(len(X_train) * 0.15)
-            X_train_part, X_val_part = X_train.iloc[:-val_size], X_train.iloc[-val_size:]
-            y_train_part, y_val_part = y_train.iloc[:-val_size], y_train.iloc[-val_size:]
-            model.fit(X_train_part, y_train_part, eval_set=[(X_val_part, y_val_part)])
-        else:
-            model.fit(X_train, y_train)
+        model.fit(X_train, y_train)
         
         logger.info(f"Training for {model_name} complete.")
         self.models[model_name] = model
+        self.trained_model = model
         self.feature_importance[model_name] = pd.Series(model.feature_importances_, index=X_train.columns).sort_values(ascending=False)
         return model
+
+    def predict_future(self, historical_df, future_weather_df, latest_economic_df, days_to_forecast):
+        """Generates a forecast for future dates."""
+        if self.trained_model is None:
+            raise Exception("Model has not been trained yet.")
+
+        logger.info(f"Starting future prediction for {days_to_forecast} days.")
+        
+        # Engineer features for the future period
+        future_features_df = self.feature_engineer.engineer_features_for_future(
+            historical_df, 
+            future_weather_df, 
+            latest_economic_df
+        )
+        
+        # Ensure columns are in the same order as during training
+        future_features_df = future_features_df[self.trained_columns]
+
+        # Scale the features
+        scaler = self.scalers['feature_scaler']
+        future_features_scaled = pd.DataFrame(
+            scaler.transform(future_features_df), 
+            index=future_features_df.index, 
+            columns=future_features_df.columns
+        )
+
+        # Make predictions
+        future_predictions = self.trained_model.predict(future_features_scaled)
+        future_forecast_series = pd.Series(future_predictions, index=future_features_df.index, name="forecast")
+
+        logger.info("Future prediction complete.")
+        return future_forecast_series
 
 class ModelEvaluator:
     """Comprehensive model evaluation."""
